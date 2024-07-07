@@ -31,7 +31,11 @@ public class Main {
       OutputStream output = clientSocket.getOutputStream();
       if (httpPath[1].equals("/")) {
         output.write(("HTTP/1.1 200 OK\r\n\r\n").getBytes());
-      } else {
+      } else if { (httpPath[1].startsWith("/echo/")) {
+        output.write(("HTTP/1.1 200 OK\r\n\r\n").getBytes());
+        output.write(httpPath[1].getBytes());
+      } 
+      else {
         output.write(("HTTP/1.1 404 Not Found\r\n\r\n").getBytes());
       }
        System.out.println("accepted new connection");
