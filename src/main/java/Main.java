@@ -1,126 +1,109 @@
-import lombok.ToString;
-
 import java.io.*;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.logging.Logger;
-import java.util.stream.Stream;
+import java.util.Objects;
 
-@ToString
-public class HttpRequest {
-    private static final Logger LOGGER = Logger.getLogger("HttpRequest");
-    private RequestType requestType;
-    private String path;
-    private Protocol protocol;
-    private double version;
-    private String requestBody;
-    private Map<String, String> headers = new HashMap<>();
+public class Main {
+  public static void main(String[] args) {
+    // You can use print statements as follows for debugging, they'll be visible when running tests.
+    System.out.println("Logs from your program will appear here!");
+    Socket clientSocket = null;
 
-    public RequestType getRequestType() {
-        return requestType;
+    String dir = null;
+    if((args.length == 2) && args[0].equals("--directory"))
+    {
+      dir = args[1];
     }
 
-    public void setRequestType(RequestType requestType) {
-        this.requestType = requestType;
+    try (ServerSocket serverSocket = new ServerSocket(4221)) {
+      while(true) {
+        serverSocket.setReuseAddress(true);
+        clientSocket = serverSocket.accept();
+        sockThread Tsock = new sockThread(clientSocket, dir);
+        Tsock.start();
+      }
+
+
+    } catch (IOException e) {
+      System.out.println("IOException: " + e.getMessage());
     }
+  }
+}
 
-    public String getRequestBody() {
-        return requestBody;
-    }
+class sockThread extends Thread {
+  private Socket sock;
+  private String dir;
+  public sockThread(Socket sock, String dir) {
+    this.sock = sock;
+    this.dir = dir;
+  }
 
-    public void setRequestBody(String requestBody) {
-        this.requestBody = requestBody;
-    }
+  @Override
+  public void run() {
+    try {
+      InputStream in = sock.getInputStream();
+      BufferedReader bif = new BufferedReader(new InputStreamReader(in, "UTF-8"));
 
-    public String getRequestTarget() {
-        return path;
-    }
+      String inr;
+      List<String> inp = new ArrayList<String>();
+      while ((inr = bif.readLine()) != null && !inr.isEmpty()) {
+        inp.add(inr);
+      }
 
-    public void setRequestTarget(String path) {
-        this.path = path;
-    }
+      String[] re = inp.get(0).split(" ");
 
-    public String getProtocolVersion() {
-        return protocol + "/" + version;
-    }
-
-    public Protocol getProtocol() {
-        return protocol;
-    }
-
-    public void setProtocol(Protocol protocol) {
-        this.protocol = protocol;
-    }
-
-    public double getVersion() {
-        return version;
-    }
-
-    public void setVersion(double version) {
-        this.version = version;
-    }
-
-    public HttpRequest addHeader(String key, String value) {
-        assert key != null : "key cannot be null";
-        assert value != null : "value cannot be null";
-        headers.put(key, value);
-        return this;
-    }
-
-    public String getHeader(String key) {
-        if (!headers.containsKey(key))
-            throw new IllegalArgumentException("Key " + key + " doesn't exist");
-        return headers.get(key);
-    }
-
-    public boolean containsHeader(String key) {
-        return headers.containsKey(key);
-    }
-
-    public void readRequestLine(String requestLine) {
-        String[] requestLineArr = requestLine.split(" ");
-        assert requestLineArr.length==3 : "Request Line should have three values: RequestType, RequestTarget and HttpVersion";
-        this.setRequestType(RequestType.valueOf(requestLineArr[0]));
-        this.setRequestTarget(requestLineArr[1]);
-        this.setProtocol(Protocol.valueOf(requestLineArr[2].substring(0, requestLineArr[2].indexOf("/"))));
-        assert requestLineArr[2].indexOf("/")+1 < requestLineArr.length : "HttpVersion string should have version number";
-        this.setVersion(Double.parseDouble(requestLineArr[2].substring(requestLineArr[2].indexOf("/")+1)));
-    }
-
-
-    public static HttpRequest  fromInputStream(InputStream inputStream) {
-        try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-            HttpRequest httpRequest = new HttpRequest();
-
-            //Read RequestLine
-            String requestLine = reader.readLine();
-            if (requestLine != null && !requestLine.isEmpty()) {
-                httpRequest.readRequestLine(requestLine);
-            }
-
-            //Read Headers
-            String line;
-            while ((line = reader.readLine()) != null && !line.isEmpty()) {
-                String[] keyValuePair = line.split(": ");
-                if (keyValuePair.length == 2)
-                    httpRequest.addHeader(keyValuePair[0], keyValuePair[1]);
-            }
-
-            // Read Body
-            StringBuffer bodyBuffer = new StringBuffer();
-            while (reader.ready()) {
-                bodyBuffer.append((char) reader.read());
-            }
-            String body = bodyBuffer.toString();
-
-            httpRequest.setRequestBody(body);
-
-            return httpRequest;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+      if (re[1].equals("/")) {
+        sendCode(sock, "HTTP/1.1 200 OK\r\n\r\n");
+      }
+      if (re[1].startsWith("/echo/")) {
+        String ec = re[1].replaceFirst("/echo/", "");
+        sendCode(sock, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + ec.length() + "\r\n\r\n" + ec);
+      }
+      if (re[1].equals("/user-agent")) {
+        String[] ua = inp.get(2).split(" ");
+        sendCode(sock, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + ua[1].length() + "\r\n\r\n" + ua[1]);
+      }
+      if (re[1].startsWith("/files/")){
+        String fi = re[1].replaceFirst("/files/", "");
+        if(Objects.equals(re[0], "GET") && Files.exists(Path.of(dir + "/" + fi))) {
+          String cc = Files.readString(Path.of(dir + "/" + fi));
+          sendCode(sock, "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " + cc.length() + "\r\n\r\n" + cc);
+        } else if (Objects.equals(re[0], "POST")) {
+          System.out.println(inp);
+          File file = new File(dir + "/" + fi);
+          if(file.createNewFile()) {
+            String[] lengt = inp.get(3).split(" ");
+            char[] bc = new char[Integer.parseInt(lengt[1])];
+            bif.read(bc, 0, Integer.parseInt(lengt[1]));
+            String bd = new String(bc);
+            Files.write(Path.of(dir + "/" + fi), bd.getBytes());
+            sendCode(sock, "HTTP/1.1 201 OK\r\n\r\n");
+          }
         }
+        {
+          sendCode(sock, "HTTP/1.1 404 Not Found\r\n\r\n");
+        }
+      } else {
+        sendCode(sock, "HTTP/1.1 404 Not Found\r\n\r\n");
+      }
+
+      System.out.println("accepted new connection");
+    } catch (IOException e) {
+      e.printStackTrace();
     }
+  }
+
+  public static void sendCode(Socket sock, String code) throws IOException {
+    byte[] msg = code.getBytes();
+
+    OutputStream out = sock.getOutputStream();
+    out.write(msg);
+    out.flush();
+    out.close();
+  }
 }
