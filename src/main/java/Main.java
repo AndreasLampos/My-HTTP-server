@@ -11,9 +11,11 @@ import java.nio.file.Paths;
 public class Main {
   public static void main(String[] args) {
     String directory = null;
-    if ((args.length == 2) && (args[0].equalsIgnoreCase("--directory"))){
-
+    if ((args.length == 2) && (args[0].equalsIgnoreCase("--directory"))) {
       directory = args[1];
+    } else {
+      System.out.println("Usage: java Main --directory <directory-path>");
+      return;
     }
 
     try (ServerSocket serverSocket = new ServerSocket(4221)) {
@@ -27,18 +29,37 @@ public class Main {
           try (BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
                OutputStream outputStream = clientSocket.getOutputStream()) {
 
+            // Read the request line
             String requestLine = reader.readLine();
+            if (requestLine == null) {
+              clientSocket.close();
+              return;
+            }
             String[] requestParts = requestLine.split(" ");
+            String method = requestParts[0];
             String path = requestParts[1];
 
+            // Read the headers
             String userAgent = "";
+            int contentLength = 0;
             String line;
             while (!(line = reader.readLine()).equals("")) {
               if (line.startsWith("User-Agent: "))
                 userAgent = line.substring(12);
+              else if (line.startsWith("Content-Length: "))
+                contentLength = Integer.parseInt(line.substring(16));
             }
 
-            if (path.startsWith("/files/")) {
+            if (method.equals("POST") && path.startsWith("/files/")) {
+              // Handle POST request for file upload
+              String fileName = path.substring(7);
+              Path filePath = Paths.get(finalDirectory, fileName);
+              byte[] fileBytes = new byte[contentLength];
+              reader.read(fileBytes, 0, contentLength);
+              Files.write(filePath, fileBytes);
+              String response = "HTTP/1.1 201 Created\r\n\r\n";
+              outputStream.write(response.getBytes());
+            } else if (method.equals("GET") && path.startsWith("/files/")) {
               String fileName = path.substring(7);
               Path filePath = Paths.get(finalDirectory, fileName);
               if (Files.exists(filePath)) {
@@ -49,14 +70,14 @@ public class Main {
               } else {
                 outputStream.write("HTTP/1.1 404 Not Found\r\n\r\n".getBytes());
               }
-            } else if (path.startsWith("/user-agent")) {
+            } else if (method.equals("GET") && path.equals("/user-agent")) {
               String response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + userAgent.length() + "\r\n\r\n" + userAgent;
               outputStream.write(response.getBytes());
-            } else if (path.startsWith("/echo/")) {
-              String randomString = path.substring(6);
-              String response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + randomString.length() + "\r\n\r\n" + randomString;
+            } else if (method.equals("GET") && path.startsWith("/echo/")) {
+              String echoMessage = path.substring(6);
+              String response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " + echoMessage.length() + "\r\n\r\n" + echoMessage;
               outputStream.write(response.getBytes());
-            } else if (path.equals("/")) {
+            } else if (method.equals("GET") && path.equals("/")) {
               outputStream.write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
             } else {
               outputStream.write("HTTP/1.1 404 Not Found\r\n\r\n".getBytes());
