@@ -36,109 +36,140 @@ public class Main {
     }
   }
 }
-class RequestHandler extends Thread {
-  private InputStream inputStream;
-  private OutputStream outputStream;
-  private String fileDir;
-  RequestHandler(InputStream inputStream, OutputStream outputStream,
-                 String fileDir) {
-    this.inputStream = inputStream;
-    this.outputStream = outputStream;
-    this.fileDir = fileDir == null ? "" : fileDir + File.separator;
-  }
-  public void run() {
-    try {
-      // Read
-      BufferedReader bufferedReader =
-          new BufferedReader(new InputStreamReader(inputStream));
-      String requestLine = bufferedReader.readLine();
-      Map<String, String> requestHeaders = new HashMap<String, String>();
-      String header = null;
-      while ((header = bufferedReader.readLine()) != null &&
-             !header.isEmpty()) {
-        String[] keyVal = header.split(":", 2);
-        if (keyVal.length == 2) {
-          requestHeaders.put(keyVal[0], keyVal[1].trim());
-        }
-      }
-      // Read body
-      StringBuffer bodyBuffer = new StringBuffer();
-      while (bufferedReader.ready()) {
-        bodyBuffer.append((char)bufferedReader.read());
-      }
-      String body = bodyBuffer.toString();
-      // Process
-      String[] requestLinePieces = requestLine.split(" ", 3);
-      String httpMethod = requestLinePieces[0];
-      String requestTarget = requestLinePieces[1];
-      String httpVersion = requestLinePieces[2];
-      // Write
-      if ("POST".equals(httpMethod)) {
-        if (requestTarget.startsWith("/files/")) {
-          File file = new File(fileDir + requestTarget.substring(7));
-          if (file.createNewFile()) {
-            FileWriter fileWriter = new FileWriter(file);
-            fileWriter.write(body);
-            fileWriter.close();
-          }
-          outputStream.write("HTTP/1.1 201 Created\r\n\r\n".getBytes());
-        } else {
-          outputStream.write("HTTP/1.1 404 Not Found\r\n\r\n".getBytes());
-        }
-        outputStream.flush();
-        outputStream.close();
-        return;
-      }
-      if (requestTarget.equals("/")) {
-        outputStream.write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
-      } else if (requestTarget.startsWith("/echo/")) {
-        String echoString = requestTarget.substring(6);
-        String outputString = "HTTP/1.1 200 OK\r\n"
-                              + "Content-Type: text/plain\r\n"
-                              + "Content-Length: " + echoString.length() +
-                              "\r\n"
-                              + "\r\n" + echoString;
-        outputStream.write(outputString.getBytes());
-      } else if (requestTarget.equals("/user-agent")) {
-        String outputString =
-            "HTTP/1.1 200 OK\r\n"
-            + "Content-Type: text/plain\r\n"
-            + "Content-Length: " + requestHeaders.get("User-Agent").length() +
-            "\r\n"
-            + "\r\n" + requestHeaders.get("User-Agent");
-        outputStream.write(outputString.getBytes());
-      } else if (requestTarget.startsWith("/files/")) {
-        String fileName = requestTarget.substring(7);
-        FileReader fileReader;
-        try {
-          fileReader = new FileReader(fileDir + fileName);
-        } catch (FileNotFoundException e) {
-          outputStream.write("HTTP/1.1 404 Not Found\r\n\r\n".getBytes());
-          outputStream.flush();
-          outputStream.close();
-          return;
-        }
-        BufferedReader bufferedFileReader = new BufferedReader(fileReader);
-        StringBuffer stringBuffer = new StringBuffer();
-        String line;
-        while ((line = bufferedFileReader.readLine()) != null) {
-          stringBuffer.append(line);
-        }
-        bufferedFileReader.close();
-        fileReader.close();
-        String outputString = "HTTP/1.1 200 OK\r\n"
-                              + "Content-Type: application/octet-stream\r\n"
-                              + "Content-Length: " + stringBuffer.length() +
-                              "\r\n"
-                              + "\r\n" + stringBuffer.toString();
-        outputStream.write(outputString.getBytes());
-      } else {
-        outputStream.write("HTTP/1.1 404 Not Found\r\n\r\n".getBytes());
-      }
-      outputStream.flush();
-      outputStream.close();
-    } catch (IOException e) {
-      System.out.println("IOException: " + e.getMessage());
+  class RequestHandler extends Thread {
+    private InputStream inputStream;
+    private OutputStream outputStream;
+    private String fileDir;
+
+    RequestHandler(InputStream inputStream, OutputStream outputStream, String fileDir) {
+        this.inputStream = inputStream;
+        this.outputStream = outputStream;
+        this.fileDir = fileDir == null ? "" : fileDir + File.separator;
     }
-  }
+
+    public void run() {
+        try {
+            // Read request
+            BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(inputStream));
+            String requestLine = bufferedReader.readLine();
+            Map<String, String> requestHeaders = new HashMap<>();
+            String header = null;
+
+            while ((header = bufferedReader.readLine()) != null && !header.isEmpty()) {
+                String[] keyVal = header.split(":", 2);
+                if (keyVal.length == 2) {
+                    requestHeaders.put(keyVal[0], keyVal[1].trim());
+                }
+            }
+
+            // Read body
+            StringBuffer bodyBuffer = new StringBuffer();
+            while (bufferedReader.ready()) {
+                bodyBuffer.append((char) bufferedReader.read());
+            }
+            String body = bodyBuffer.toString();
+
+            // Get Accept-Encoding header
+            String acceptEncoding = requestHeaders.get("Accept-Encoding");
+            boolean gzipRequested = acceptEncoding != null && acceptEncoding.contains("gzip");
+
+            // Process request
+            String[] requestLinePieces = requestLine.split(" ", 3);
+            String httpMethod = requestLinePieces[0];
+            String requestTarget = requestLinePieces[1];
+            String httpVersion = requestLinePieces[2];
+
+            if ("POST".equals(httpMethod)) {
+                if (requestTarget.startsWith("/files/")) {
+                    File file = new File(fileDir + requestTarget.substring(7));
+                    if (file.createNewFile()) {
+                        try (FileWriter fileWriter = new FileWriter(file)) {
+                            fileWriter.write(body);
+                        }
+                        outputStream.write("HTTP/1.1 201 Created\r\n\r\n".getBytes());
+                    } else {
+                        outputStream.write("HTTP/1.1 500 Internal Server Error\r\n\r\n".getBytes());
+                    }
+                } else {
+                    outputStream.write("HTTP/1.1 404 Not Found\r\n\r\n".getBytes());
+                }
+                outputStream.flush();
+                outputStream.close();
+                return;
+            }
+
+            String responseString;
+            if (requestTarget.equals("/")) {
+                responseString = "HTTP/1.1 200 OK\r\n\r\n";
+            } else if (requestTarget.startsWith("/echo/")) {
+                String echoString = requestTarget.substring(6);
+                responseString = "HTTP/1.1 200 OK\r\n"
+                        + "Content-Type: text/plain\r\n"
+                        + "Content-Length: " + echoString.length() + "\r\n";
+                if (gzipRequested) {
+                    responseString += "Content-Encoding: gzip\r\n";
+                }
+                responseString += "\r\n" + echoString;
+            } else if (requestTarget.equals("/user-agent")) {
+                String userAgent = requestHeaders.get("User-Agent");
+                if (userAgent == null) {
+                    userAgent = "";
+                }
+                responseString = "HTTP/1.1 200 OK\r\n"
+                        + "Content-Type: text/plain\r\n"
+                        + "Content-Length: " + userAgent.length() + "\r\n";
+                if (gzipRequested) {
+                    responseString += "Content-Encoding: gzip\r\n";
+                }
+                responseString += "\r\n" + userAgent;
+            } else if (requestTarget.startsWith("/files/")) {
+                String fileName = requestTarget.substring(7);
+                File file = new File(fileDir + fileName);
+                if (file.exists()) {
+                    try (BufferedReader fileReader = new BufferedReader(new FileReader(file))) {
+                        StringBuffer fileContent = new StringBuffer();
+                        String line;
+                        while ((line = fileReader.readLine()) != null) {
+                            fileContent.append(line);
+                        }
+                        responseString = "HTTP/1.1 200 OK\r\n"
+                                + "Content-Type: application/octet-stream\r\n"
+                                + "Content-Length: " + fileContent.length() + "\r\n";
+                        if (gzipRequested) {
+                            responseString += "Content-Encoding: gzip\r\n";
+                        }
+                        responseString += "\r\n";
+                        outputStream.write(responseString.getBytes());
+
+                        if (gzipRequested) {
+                            try (GZIPOutputStream gzipOutputStream = new GZIPOutputStream(outputStream)) {
+                                gzipOutputStream.write(fileContent.toString().getBytes());
+                            }
+                        } else {
+                            outputStream.write(fileContent.toString().getBytes());
+                        }
+                    }
+                } else {
+                    responseString = "HTTP/1.1 404 Not Found\r\n\r\n";
+                    outputStream.write(responseString.getBytes());
+                }
+            } else {
+                responseString = "HTTP/1.1 404 Not Found\r\n\r\n";
+                outputStream.write(responseString.getBytes());
+            }
+
+            if (gzipRequested && !requestTarget.startsWith("/files/")) {
+                try (GZIPOutputStream gzipOutputStream = new GZIPOutputStream(outputStream)) {
+                    gzipOutputStream.write(responseString.getBytes());
+                }
+            } else {
+                outputStream.write(responseString.getBytes());
+            }
+
+            outputStream.flush();
+            outputStream.close();
+        } catch (IOException e) {
+            System.out.println("IOException: " + e.getMessage());
+        }
+    }
 }
