@@ -8,17 +8,40 @@ public class Main {
     // when running tests.
     System.out.println("Logs from your program will appear here!");
 
-    // Uncomment this block to pass the first stage
-
     ServerSocket serverSocket = null;
-    Socket clientSocket = null;
 
     try {
       serverSocket = new ServerSocket(4221);
-      // Since the tester restarts your program quite often, setting SO_REUSEADDR
-      // ensures that we don't run into 'Address already in use' errors
       serverSocket.setReuseAddress(true);
-      clientSocket = serverSocket.accept(); // Wait for connection from client.`
+
+      while (true) {
+        Socket clientSocket = serverSocket.accept();
+        new Thread(new ClientHandler(clientSocket)).start();
+      }
+    } catch (IOException e) {
+      System.out.println("IOException: " + e.getMessage());
+    } finally {
+      if (serverSocket != null) {
+        try {
+          serverSocket.close();
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      }
+    }
+  }
+}
+
+class ClientHandler implements Runnable {
+  private Socket clientSocket;
+
+  public ClientHandler(Socket socket) {
+    this.clientSocket = socket;
+  }
+
+  @Override
+  public void run() {
+    try {
       InputStream inputStream = clientSocket.getInputStream();
       BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
       String line = reader.readLine();
@@ -35,10 +58,7 @@ public class Main {
         String header = String.format(
             "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
             msg.length(), msg);
-        clientSocket.getOutputStream().write(header.getBytes());
-        System.out.println("version");
-        String response = "HTTP/1.1 200 OK\r\n" + "Content-Type: text/plain\r\n" + "Content-Length: 0\r\n\r\n";
-        output.write(response.getBytes());
+        output.write(header.getBytes());
       } else if (str[1].equals("user-agent")) {
         reader.readLine();
         String useragent = reader.readLine().split("\\s+")[1];
@@ -47,15 +67,23 @@ public class Main {
         output.write(reply.getBytes());
       } else if ((str.length > 2 && str[1].equals("echo"))) {
         String responsebody = str[2];
-        String finalstr = "HTTP/1.1 200 OK\r\n" + "Content-Type: text/plain\r\n" + "Content-Length: " + responsebody.length() +"\r\n\r\n" + responsebody;
+        String finalstr = "HTTP/1.1 200 OK\r\n" + "Content-Type: text/plain\r\n" + "Content-Length: " + responsebody.length() + "\r\n\r\n" + responsebody;
         output.write(finalstr.getBytes());
       } else {
         output.write(("HTTP/1.1 404 Not Found\r\n\r\n").getBytes());
       }
       System.out.println("accepted new connection");
-      clientSocket.getOutputStream().write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
+      output.write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
     } catch (IOException e) {
       System.out.println("IOException: " + e.getMessage());
+    } finally {
+      if (clientSocket != null) {
+        try {
+          clientSocket.close();
+        } catch (IOException e) {
+          e.printStackTrace();
+        }
+      }
     }
   }
 }
