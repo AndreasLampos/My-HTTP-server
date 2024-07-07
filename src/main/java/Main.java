@@ -3,7 +3,17 @@ import java.net.Socket;
 import java.io.*;
 
 public class Main {
+  private static String directory;
+
   public static void main(String[] args) {
+    // Parse the command-line argument for the directory
+    if (args.length == 2 && args[0].equals("--directory")) {
+      directory = args[1];
+    } else {
+      System.out.println("Usage: java Main --directory <directory-path>");
+      return;
+    }
+
     // You can use print statements as follows for debugging, they'll be visible
     // when running tests.
     System.out.println("Logs from your program will appear here!");
@@ -30,58 +40,58 @@ public class Main {
       }
     }
   }
-}
 
-class ClientHandler implements Runnable {
-  private Socket clientSocket;
+  static class ClientHandler implements Runnable {
+    private Socket clientSocket;
 
-  public ClientHandler(Socket socket) {
-    this.clientSocket = socket;
-  }
+    public ClientHandler(Socket socket) {
+      this.clientSocket = socket;
+    }
 
-  @Override
-  public void run() {
-    try {
-      InputStream inputStream = clientSocket.getInputStream();
-      BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-      String line = reader.readLine();
-      System.out.println(line);
-      String[] httpPath = line.split(" ", 0);
-      System.out.println(httpPath[1]);
-      String[] HttpRequest = line.split(" ", 0);
-      String[] str = HttpRequest[1].split("/");
-      OutputStream output = clientSocket.getOutputStream();
-      if (httpPath[1].equals("/")) {
-        output.write(("HTTP/1.1 200 OK\r\n\r\n").getBytes());
-      } else if (httpPath[1].startsWith("/echo/")) {
-        String msg = HttpRequest[1].substring(6);
-        String header = String.format(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
-            msg.length(), msg);
-        output.write(header.getBytes());
-      } else if (str[1].equals("user-agent")) {
-        reader.readLine();
-        String useragent = reader.readLine().split("\\s+")[1];
-        String reply = String.format(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %s\r\n\r\n%s\r\n", useragent.length(), useragent);
-        output.write(reply.getBytes());
-      } else if ((str.length > 2 && str[1].equals("echo"))) {
-        String responsebody = str[2];
-        String finalstr = "HTTP/1.1 200 OK\r\n" + "Content-Type: text/plain\r\n" + "Content-Length: " + responsebody.length() + "\r\n\r\n" + responsebody;
-        output.write(finalstr.getBytes());
-      } else {
-        output.write(("HTTP/1.1 404 Not Found\r\n\r\n").getBytes());
-      }
-      System.out.println("accepted new connection");
-      output.write("HTTP/1.1 200 OK\r\n\r\n".getBytes());
-    } catch (IOException e) {
-      System.out.println("IOException: " + e.getMessage());
-    } finally {
-      if (clientSocket != null) {
-        try {
-          clientSocket.close();
-        } catch (IOException e) {
-          e.printStackTrace();
+    @Override
+    public void run() {
+      try {
+        InputStream inputStream = clientSocket.getInputStream();
+        BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+        String line = reader.readLine();
+        System.out.println(line);
+        String[] httpPath = line.split(" ", 0);
+        String path = httpPath[1];
+
+        OutputStream output = clientSocket.getOutputStream();
+
+        if (path.startsWith("/files/")) {
+          String filename = path.substring(7);  // Remove "/files/" from the path
+          File file = new File(directory, filename);
+
+          if (file.exists() && file.isFile()) {
+            byte[] fileContent = new byte[(int) file.length()];
+            FileInputStream fis = new FileInputStream(file);
+            fis.read(fileContent);
+            fis.close();
+
+            String header = String.format(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n",
+                file.length());
+            output.write(header.getBytes());
+            output.write(fileContent);
+          } else {
+            output.write(("HTTP/1.1 404 Not Found\r\n\r\n").getBytes());
+          }
+        } else {
+          output.write(("HTTP/1.1 404 Not Found\r\n\r\n").getBytes());
+        }
+
+        clientSocket.close();
+      } catch (IOException e) {
+        System.out.println("IOException: " + e.getMessage());
+      } finally {
+        if (clientSocket != null) {
+          try {
+            clientSocket.close();
+          } catch (IOException e) {
+            e.printStackTrace();
+          }
         }
       }
     }
