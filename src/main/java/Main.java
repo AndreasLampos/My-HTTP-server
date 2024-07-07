@@ -4,6 +4,7 @@ import java.net.Socket;
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.zip.GZIPOutputStream;
 
 public class Main {
     private static String directory;
@@ -66,6 +67,8 @@ public class Main {
             OutputStream outputStream = clientSocket.getOutputStream();
             String httpResponse = getHttpResponse(httpMethod, urlPath, headers, body);
             System.out.println("Sending response: " + httpResponse);
+
+            // Write the response header and body
             outputStream.write(httpResponse.getBytes("UTF-8"));
 
             // Close the input and output streams.
@@ -89,18 +92,35 @@ public class Main {
                                           Map<String, String> headers, String body)
             throws IOException {
         String httpResponse;
+        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
+        OutputStream responseStream;
 
         if ("GET".equals(httpMethod)) {
             if ("/".equals(urlPath)) {
                 httpResponse = "HTTP/1.1 200 OK\r\n\r\n";
             } else if (urlPath.startsWith("/echo/")) {
                 String echoStr = urlPath.substring(6); // Extract the string after "/echo/"
-                String contentEncoding = headers.get("Accept-Encoding");
-                if (contentEncoding != null && contentEncoding.toLowerCase().contains("gzip")) {
-                    // Add Content-Encoding: gzip header if gzip is supported
+                String acceptEncoding = headers.get("Accept-Encoding");
+                boolean supportsGzip = false;
+                if (acceptEncoding != null) {
+                    String[] encodings = acceptEncoding.split(",");
+                    for (String encoding : encodings) {
+                        if ("gzip".equalsIgnoreCase(encoding.trim())) {
+                            supportsGzip = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (supportsGzip) {
+                    // Compress the response body using gzip
+                    responseStream = new GZIPOutputStream(byteArrayOutputStream);
+                    responseStream.write(echoStr.getBytes("UTF-8"));
+                    responseStream.close(); // Important to close the stream to complete compression
+                    byte[] gzipData = byteArrayOutputStream.toByteArray();
                     httpResponse =
                             "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Type: text/plain\r\nContent-Length: " +
-                            echoStr.length() + "\r\n\r\n" + echoStr;
+                            gzipData.length + "\r\n\r\n";
                 } else {
                     httpResponse =
                             "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: " +
@@ -119,7 +139,8 @@ public class Main {
                     byte[] fileContent = Files.readAllBytes(file.toPath());
                     httpResponse =
                             "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: " +
-                            fileContent.length + "\r\n\r\n" + new String(fileContent);
+                            fileContent.length + "\r\n\r\n";
+                    byteArrayOutputStream.write(fileContent);
                 } else {
                     httpResponse = "HTTP/1.1 404 Not Found\r\n\r\n";
                 }
@@ -135,18 +156,14 @@ public class Main {
                 // Get the length of the request body
                 if (headers.containsKey("Content-Length")) {
                     int contentLength = Integer.parseInt(headers.get("Content-Length"));
-                    char[] buffer = new char[contentLength];
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(body.getBytes())))) {
-                        int bytesRead = reader.read(buffer, 0, contentLength);
-                        if (bytesRead == contentLength) {
-                            // Write the request body to the file
-                            try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
-                                writer.write(buffer, 0, bytesRead);
-                            }
-                            httpResponse = "HTTP/1.1 201 Created\r\n\r\n";
-                        } else {
-                            httpResponse = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
+                    if (contentLength == body.length()) {
+                        // Write the request body to the file
+                        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+                            writer.write(body);
                         }
+                        httpResponse = "HTTP/1.1 201 Created\r\n\r\n";
+                    } else {
+                        httpResponse = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
                     }
                 } else {
                     httpResponse = "HTTP/1.1 400 Bad Request\r\n\r\n";
@@ -156,6 +173,8 @@ public class Main {
             httpResponse = "HTTP/1.1 404 Not Found\r\n\r\n";
         }
 
-        return httpResponse;
+        byteArrayOutputStream.flush();
+        byte[] responseBytes = byteArrayOutputStream.toByteArray();
+        return httpResponse + new String(responseBytes, "UTF-8");
     }
 }
