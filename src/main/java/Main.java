@@ -58,15 +58,12 @@ class ClientHandler implements Runnable {
       BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
       String line = reader.readLine();
       System.out.println(line);
-
       if (line == null) {
         clientSocket.close();
         return;
       }
-
       String[] httpPath = line.split(" ", 0);
       String path = httpPath[1];
-
       OutputStream output = clientSocket.getOutputStream();
 
       if (path.equals("/")) {
@@ -80,16 +77,16 @@ class ClientHandler implements Runnable {
             msg.length(), msg);
         output.write(header.getBytes());
       } else if (path.equals("/user-agent")) {
-        reader.readLine();  // Skip the Host line
-        String userAgent = reader.readLine().split(": ")[1];
-        String response = String.format(
+        reader.readLine();
+        String useragent = reader.readLine().split(": ")[1];
+        String reply = String.format(
             "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
-            userAgent.length(), userAgent);
-        output.write(response.getBytes());
+            useragent.length(), useragent);
+        output.write(reply.getBytes());
       } else {
         output.write(("HTTP/1.1 404 Not Found\r\n\r\n").getBytes());
       }
-
+      System.out.println("accepted new connection");
       clientSocket.close();
     } catch (IOException e) {
       System.out.println("IOException: " + e.getMessage());
